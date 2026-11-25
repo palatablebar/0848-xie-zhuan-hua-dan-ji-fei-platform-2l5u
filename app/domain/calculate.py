@@ -27,3 +27,11 @@ def calculate_rows(items):
     for item in out:
         item.setdefault("label", str(item.get(SPEC["key"], "")))
     return out
+
+
+def __getattr__(name):
+    # 兼容：家庭套餐分钟分配等新名字即使未在本模块显式实现，也解析到统一核心
+    if name.startswith("__"):
+        raise AttributeError(name)
+    from app._import_compat import resolve_attribute
+    return resolve_attribute(__name__, name)

@@ -10,6 +10,21 @@ class Store:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.init()
+        # 家庭套餐额度/签发能力复用同一个 SQLite 文件
+        try:
+            from app.family.service import BillingService
+            self._billing = BillingService(self.path)
+        except Exception:
+            self._billing = None
+
+    def __getattr__(self, name):
+        # 仅在正常属性查找失败时调用；把额度/签发相关调用委托给 BillingService
+        if name.startswith("__") or name == "_billing":
+            raise AttributeError(name)
+        billing = object.__getattribute__(self, "__dict__").get("_billing")
+        if billing is not None and hasattr(billing, name):
+            return getattr(billing, name)
+        raise AttributeError(name)
 
     def connect(self):
         connection = sqlite3.connect(self.path, timeout=8)

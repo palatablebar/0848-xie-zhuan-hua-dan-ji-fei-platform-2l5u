@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>家庭套餐额度核对 · 携转话单计费台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='layout.css') }}">
+  <style>
+    body { font-family: 'Menlo','PingFang SC',monospace; background:#e5ece0; color:#162e20; margin:0; }
+    .wrap { max-width:1180px; margin:0 auto; padding:18px; }
+    a.back { color:#24513c; text-decoration:none; font-size:13px; }
+    h1 { font-size:20px; margin:6px 0 2px; }
+    .sub { color:#486253; font-size:13px; margin-bottom:14px; }
+    .grid { display:grid; grid-template-columns: 360px 1fr; gap:14px; }
+    .card { background:#f5f8f1; border:1px solid #cdd8c4; border-radius:2px; padding:14px; }
+    .card h2 { font-size:14px; margin:0 0 10px; }
+    label { display:block; font-size:12px; color:#486253; margin:8px 0 3px; }
+    input, textarea { width:100%; box-sizing:border-box; border:1px solid #b9c7ae; background:#fff;
+      padding:7px; font-family:inherit; font-size:12px; border-radius:1px; }
+    textarea { min-height:190px; resize:vertical; }
+    .row { display:flex; gap:8px; }
+    .row > div { flex:1; }
+    button { background:#24513c; color:#f5f8f1; border:0; padding:8px 10px; font-size:12px;
+      font-family:inherit; cursor:pointer; border-radius:1px; margin:6px 6px 0 0; }
+    button.secondary { background:#5b7563; }
+    button.warn { background:#8a5a18; }
+    button:disabled { opacity:.5; cursor:default; }
+    .kpis { display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+    .kpi { background:#f5f8f1; border:1px solid #cdd8c4; padding:10px 14px; min-width:120px; }
+    .kpi .v { font-size:22px; font-weight:700; }
+    .kpi .k { font-size:12px; color:#486253; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th, td { border-bottom:1px solid #d5dfcd; padding:6px 8px; text-align:right; }
+    th:first-child, td:first-child { text-align:left; }
+    th { color:#486253; font-weight:600; }
+    .ok { color:#1d6b3a; } .bad { color:#a12622; }
+    pre.out { background:#162e20; color:#cfe3c2; padding:10px; font-size:11px; overflow:auto;
+      max-height:260px; border-radius:2px; }
+    .checks li { font-size:12px; margin:3px 0; list-style:none; }
+    .checks { padding-left:0; }
+    .hint { font-size:11px; color:#486253; }
+    @media (max-width: 900px){ .grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← 返回话单计费台</a>
+  <h1>家庭套餐共享分钟 · 签发核对工作台</h1>
+  <div class="sub">同一账期共享额度；未签发话单按每分钟价值最优分配，已签发优惠锁定；并发不超扣，失败回滚，重试不重复扣减。</div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="k-gift">–</div><div class="k">套餐赠送分钟</div></div>
+    <div class="kpi"><div class="v" id="k-used">–</div><div class="k">已签发扣减</div></div>
+    <div class="kpi"><div class="v" id="k-remain">–</div><div class="k">套餐余量</div></div>
+    <div class="kpi"><div class="v" id="k-due">–</div><div class="k">签发应收(分)</div></div>
+    <div class="kpi"><div class="v" id="k-balanced">–</div><div class="k">对账守恒</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>套餐与话单</h2>
+      <div class="row">
+        <div><label>家庭套餐 ID</label><input id="plan" value="F1"></div>
+        <div><label>账期</label><input id="period" value="2026-11"></div>
+      </div>
+      <label>赠送分钟总额</label><input id="gift" type="number" value="100">
+      <label>话单 JSON（number / minutes / rate_per_min_cents）</label>
+      <textarea id="cdrs"></textarea>
+      <div>
+        <button onclick="createPlan()">1. 建立/重置套餐</button>
+        <button class="secondary" onclick="loadScarce()">载入争额度样例</button>
+      </div>
+      <div>
+        <button class="secondary" onclick="quote()">2. 最优试算（少收钱）</button>
+        <button onclick="issue(false)">3. 签发本批</button>
+      </div>
+      <div>
+        <button class="warn" onclick="issue(true)">模拟签发失败→恢复</button>
+        <button class="secondary" onclick="retryFailed()">用同键重试</button>
+      </div>
+      <div>
+        <button onclick="concurrent()">两批同时提交（不超扣）</button>
+        <button class="secondary" onclick="refresh()">刷新核对</button>
+      </div>
+      <p class="hint" id="msg"></p>
+    </div>
+
+    <div>
+      <div class="card" style="margin-bottom:14px;">
+        <h2>各号码签发后应收与套餐余量</h2>
+        <table>
+          <thead><tr><th>号码</th><th>计费分钟</th><th>赠送分钟</th><th>应付分钟</th><th>应收(分)</th></tr></thead>
+          <tbody id="num-body"><tr><td colspan="5" class="hint">尚未签发</td></tr></tbody>
+        </table>
+        <ul class="checks" id="checks"></ul>
+      </div>
+      <div class="card">
+        <h2>返回 / 原始 JSON</h2>
+        <pre class="out" id="out">// 操作结果会显示在这里</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function defaultCdrs(){
+  return [
+    {call_id:"LOW",  number:"13800000001", minutes:10, rate_per_min_cents:10},
+    {call_id:"HIGH", number:"13900000002", minutes:10, rate_per_min_cents:30}
+  ];
+}
+$("cdrs").value = JSON.stringify(defaultCdrs(), null, 2);
+let lastFailKey = "fail-" + Math.random().toString(36).slice(2,8);
+
+function cdrs(){ try { return JSON.parse($("cdrs").value || "[]"); } catch(e){ setMsg("JSON 解析失败: "+e, true); return []; } }
+function setMsg(t, bad){ const m=$("msg"); m.textContent=t; m.className = "hint " + (bad?"bad":"ok"); }
+function show(o){ $("out").textContent = JSON.stringify(o, null, 2); }
+function qs(){ return "?plan_id="+encodeURIComponent($("plan").value)+"&period="+encodeURIComponent($("period").value); }
+
+async function api(path, body, method){
+  const opt = { method: method || (body ? "POST" : "GET"), headers: {"Content-Type":"application/json"} };
+  if (body) opt.body = JSON.stringify(body);
+  const res = await fetch(path, opt);
+  let data = null; try { data = await res.json(); } catch(e){ data = {status:res.status}; }
+  if (!res.ok) { show(data); throw new Error((data && data.code) || ("HTTP "+res.status)); }
+  return data;
+}
+
+async function createPlan(){
+  const data = await api("/api/family/plans", {plan_id:$("plan").value, period:$("period").value,
+    gift_minutes:Number($("gift").value)});
+  show(data); setMsg("套餐已建立，额度 "+data.gift_minutes); refresh();
+}
+function loadScarce(){
+  $("gift").value = 1;
+  $("cdrs").value = JSON.stringify([
+    {call_id:"CHEAP-EARLY", number:"138****0001", minutes:10, rate_per_min_cents:10, arrival:0},
+    {call_id:"PRICEY-LATE", number:"139****0002", minutes:10, rate_per_min_cents:30, arrival:5}
+  ], null, 2);
+  setMsg("总额度仅 1 分钟：最优分配会把它给高价话单，而不是早到的低价话单。");
+}
+async function quote(){
+  const data = await api("/api/allocate", {budget:Number($("gift").value), lines:cdrs()});
+  show(data);
+  setMsg("最优试算完成：合计应收 " + data.amount_due_cents + " 分（已最小化）。");
+}
+async function issue(fail){
+  const key = fail ? lastFailKey : ("k-" + Date.now());
+  const body = {plan_id:$("plan").value, period:$("period").value, idempotency_key:key,
+    lines:cdrs(), fail: !!fail};
+  try {
+    const data = await api("/api/issue", body);
+    show(data); setMsg("签发成功 " + data.issuance_id + "，扣减 " + data.granted_minutes + " 分钟。");
+    refresh();
+  } catch(e){
+    setMsg("签发失败，额度已恢复：" + e.message, true);
+    await refresh();
+  }
+}
+async function retryFailed(){
+  const data = await api("/api/issue", {plan_id:$("plan").value, period:$("period").value,
+    idempotency_key:lastFailKey, lines:cdrs()});
+  show(data); setMsg("同键重试成功，仅扣一次；replayed=" + data.replayed);
+  refresh();
+}
+async function concurrent(){
+  // 两批各申请 60 分钟，共享 100 分钟池：数据库条件更新保证 granted<=100
+  const mk = (i) => ({plan_id:$("plan").value, period:$("period").value,
+    idempotency_key:"conc-"+Date.now()+"-"+i,
+    lines:[{call_id:"C"+i+"-"+Date.now(), number:"137000000"+(10+i), minutes:60, rate_per_min_cents:20}]});
+  const [a,b] = await Promise.allSettled([api("/api/issue", mk(1)), api("/api/issue", mk(2))]);
+  show({batchA: a.status==="fulfilled"?a.value:a.reason.message,
+        batchB: b.status==="fulfilled"?b.value:b.reason.message});
+  setMsg("两批同时提交完成，请核对已扣减不超过套餐额度。");
+  refresh();
+}
+async function refresh(){
+  try {
+    const wb = await api("/api/workbench"+qs());
+    show(wb);
+    $("k-gift").textContent = wb.gift_minutes;
+    $("k-used").textContent = wb.granted_minutes;
+    $("k-remain").textContent = wb.remaining_minutes;
+    $("k-due").textContent = wb.total_receivable_cents;
+    $("k-balanced").textContent = wb.balanced ? "守恒 ✓" : "不平 ✗";
+    $("k-balanced").className = "v " + (wb.balanced ? "ok" : "bad");
+    const rows = wb.numbers || [];
+    $("num-body").innerHTML = rows.length ? rows.map(n =>
+      `<tr><td>${n.number||""}</td><td>${n.minutes}</td><td>${n.granted_minutes}</td>`+
+      `<td>${n.payable_minutes}</td><td>${n.receivable_cents}</td></tr>`).join("")
+      : '<tr><td colspan="5" class="hint">尚未签发</td></tr>';
+    $("checks").innerHTML = (wb.checks||[]).map(c =>
+      `<li class="${c.ok?"ok":"bad"}">${c.ok?"✓":"✗"} ${c.label}</li>`).join("");
+  } catch(e){ /* 套餐可能尚未建立 */ }
+}
+refresh();
+</script>
+</body>
+</html>

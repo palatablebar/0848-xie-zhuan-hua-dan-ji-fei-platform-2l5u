@@ -23,5 +23,7 @@ docker compose config --quiet
 2. 选择 `dirty` 样例观察坏行和隔离原因。
 3. 换 `clean` 样例执行批次，填写复核意见后签发。
 4. 下载证据 JSON，核对来源摘要、指标和签发版本。
+5. 打开 `/family`（或导航中的“家庭套餐额度核对”），建立同一账期的家庭套餐，
+   试算共享赠送分钟的最优分配、签发、模拟失败恢复与并发提交，并按号码核对应收和套餐余量。
 
 业务规则见 `docs/BUSINESS-RULES.md`，字段定义见 `docs/DATA-DICTIONARY.md`。

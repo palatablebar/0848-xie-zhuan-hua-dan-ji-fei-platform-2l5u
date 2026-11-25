@@ -82,3 +82,11 @@ def pipeline(profile="dirty", path=None, upto="证据交付"):
             (SPEC["code"] + profile + intake["sha256"] + SPEC["rule"]).encode("utf-8")).hexdigest()[:24],
     }
     return jsonable(payload)
+
+
+def __getattr__(name):
+    # 兼容：家庭套餐/签发额度相关的新符号可从 app.service 直接导入
+    if name.startswith("__"):
+        raise AttributeError(name)
+    from app._import_compat import resolve_attribute
+    return resolve_attribute(__name__, name)
